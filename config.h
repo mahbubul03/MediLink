@@ -1,0 +1,64 @@
+#pragma once
+#include <Arduino.h>
+
+// ESP32-S3 N16R8
+// I2C: MAX30105 + FT6336U touch controller
+#define I2C_SDA_PIN 21
+#define I2C_SCL_PIN 20
+#define I2C_BUS_CLOCK_HZ 100000
+#define PULSEOX_SDA_PIN I2C_SDA_PIN
+#define PULSEOX_SCL_PIN I2C_SCL_PIN
+#define MAX30102_I2C_ADDR 0x57
+
+// ADS1293 SPI wiring from medilink_ecg_v3.ino
+#define ECG_SCLK 12
+#define ECG_MOSI 11
+#define ECG_MISO 13
+#define ECG_CS 10
+#define ECG_DRDY 9
+#define ECG_ALARM 8
+#define ECG_SAMPLE_RATE_HZ 853.333f
+
+// MSP3526: ST7796 + FT6336U (from displayTest.ino)
+#define TFT_CS 14
+#define TFT_RST 16
+#define TFT_DC 15
+#define TFT_MOSI 11
+#define TFT_SCK 12
+#define TFT_MISO 13
+#define TFT_BL 3
+#define TP_SDA 5
+#define TP_SCL 6
+#define TP_RST 7
+#define TP_INT 4
+#define TOUCH_ADDR 0x38
+#define SCREEN_W 480
+#define SCREEN_H 320
+
+// GPS NEO-6M UART
+#define GPS_RX_PIN 18
+#define GPS_TX_PIN 17
+#define GPS_BAUD 9600
+
+#define WIFI_MANAGER_AP_NAME "PHMS-Setup"
+#define WIFI_MANAGER_AP_PASSWORD ""
+#define FIREBASE_API_KEY "REPLACE_WITH_YOUR_FIREBASE_API_KEY"
+#define FIREBASE_DATABASE_URL "https://YOUR_PROJECT-default-rtdb.REGION.firebasedatabase.app/"
+#define FIREBASE_UPLOAD_INTERVAL_MS 5000UL
+#define FIREBASE_WIFI_RETRY_MS 10000UL
+
+#define PULSEOX_TASK_STACK 4096
+#define ECG_TASK_STACK 6144
+#define DISPLAY_TASK_STACK 6144
+#define GPS_TASK_STACK 4096
+#define FIREBASE_TASK_STACK 8192
+#define PULSEOX_TASK_PRIORITY 2
+#define ECG_TASK_PRIORITY 4
+#define DISPLAY_TASK_PRIORITY 2
+#define GPS_TASK_PRIORITY 1
+#define FIREBASE_TASK_PRIORITY 1
+#define PULSEOX_TASK_CORE 0
+#define ECG_TASK_CORE 1
+#define DISPLAY_TASK_CORE 1
+#define GPS_TASK_CORE 0
+#define FIREBASE_TASK_CORE 0
