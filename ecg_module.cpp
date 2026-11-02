@@ -59,6 +59,26 @@ static float baseline2 = 0.0f;
 static float lowpass1 = 0.0f;
 static float lowpass2 = 0.0f;
 static bool filterInitialized = false;
+static uint32_t lastSampleMs = 0;
+static bool streaming = false;
+
+// Shared-bus lock: the TFT uses the same SCLK/MOSI/MISO. Without this, the
+// display task can be preempted mid-transfer by the ECG task (same core) and
+// ADS1293 bytes get clocked into the TFT (garbage / no trace), or vice versa.
+static inline void spiLock() {
+    if (spiMutex != nullptr) xSemaphoreTake(spiMutex, portMAX_DELAY);
+}
+static inline void spiUnlock() {
+    if (spiMutex != nullptr) xSemaphoreGive(spiMutex);
+}
+
+static void setEcgStatus(const char *status) {
+    if (vitalsMutex != nullptr &&
+        xSemaphoreTake(vitalsMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        if (vitals.ecgStatus != status) vitals.ecgStatus = status;
+        xSemaphoreGive(vitalsMutex);
+    }
+}
 
 // -----------------------------------------------------------------------------
 // SPI access
@@ -72,25 +92,30 @@ static inline void ecgDeselect() {
 }
 
 static void adsWriteRegister(uint8_t reg, uint8_t value) {
+    spiLock();
     ecgSPI.beginTransaction(SPISettings(ECG_SPI_HZ, MSBFIRST, SPI_MODE0));
     ecgSelect();
     ecgSPI.transfer(reg & 0x7F);
     ecgSPI.transfer(value);
     ecgDeselect();
     ecgSPI.endTransaction();
+    spiUnlock();
 }
 
 static uint8_t adsReadRegister(uint8_t reg) {
+    spiLock();
     ecgSPI.beginTransaction(SPISettings(ECG_SPI_HZ, MSBFIRST, SPI_MODE0));
     ecgSelect();
     ecgSPI.transfer(reg | 0x80);
     const uint8_t value = ecgSPI.transfer(0x00);
     ecgDeselect();
     ecgSPI.endTransaction();
+    spiUnlock();
     return value;
 }
 
 static void adsReadBurst(uint8_t firstRegister, uint8_t *destination, size_t length) {
+    spiLock();
     ecgSPI.beginTransaction(SPISettings(ECG_SPI_HZ, MSBFIRST, SPI_MODE0));
     ecgSelect();
     ecgSPI.transfer(firstRegister | 0x80);
@@ -101,6 +126,7 @@ static void adsReadBurst(uint8_t firstRegister, uint8_t *destination, size_t len
 
     ecgDeselect();
     ecgSPI.endTransaction();
+    spiUnlock();
 }
 
 // -----------------------------------------------------------------------------
@@ -129,13 +155,14 @@ static void IRAM_ATTR ecgDataReadyISR() {
 // ADS1293 initialization
 // -----------------------------------------------------------------------------
 bool ecgModuleInit() {
+    digitalWrite(ECG_CS, HIGH);   // no low glitch on CS while shared bus is active
     pinMode(ECG_CS, OUTPUT);
     ecgDeselect();
 
     pinMode(ECG_DRDY, INPUT_PULLUP);
     pinMode(ECG_ALARM, INPUT_PULLUP);
 
-    ecgSPI.begin(ECG_SCLK, ECG_MISO, ECG_MOSI, ECG_CS);
+    ecgSPI.begin(ECG_SCLK, ECG_MISO, ECG_MOSI, -1);   // CS is driven manually
     delay(5);
 
     // Put device in standby before configuring it.
@@ -147,6 +174,7 @@ bool ecgModuleInit() {
 
     if (revision == 0x00 || revision == 0xFF) {
         Serial.println("[ECG] ERROR: ADS1293 not responding. Check power, GND, SPI and CS.");
+        setEcgStatus("NOT DETECTED");
         return false;
     }
 
@@ -299,6 +327,10 @@ void ecgModuleTask(void *parameter) {
         if (pendingNotifications == 0) {
             // Safety-net polling in case an interrupt edge was missed.
             if (digitalRead(ECG_DRDY) != LOW) {
+                if (millis() - lastSampleMs > 1000) {
+                    streaming = false;
+                    setEcgStatus("NO DATA");
+                }
                 if (millis() - lastDiagnosticMs >= ECG_DIAG_INTERVAL_MS) {
                     lastDiagnosticMs = millis();
 
@@ -387,6 +419,11 @@ void ecgModuleTask(void *parameter) {
 
         ++sampleSequence;
         ++successfulSamples;
+        lastSampleMs = millis();
+        if (!streaming) {
+            streaming = true;
+            setEcgStatus("STREAMING");
+        }
 
         // Update diagnostic status once per second, not once per sample.
         if (millis() - lastDiagnosticMs >= ECG_DIAG_INTERVAL_MS) {

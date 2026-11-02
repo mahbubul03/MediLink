@@ -20,6 +20,8 @@ struct VitalsData {
 extern VitalsData vitals;
 extern SemaphoreHandle_t vitalsMutex;
 extern SemaphoreHandle_t i2cMutex;
+// Guards the shared FSPI bus (TFT + ADS1293 share SCLK/MOSI/MISO).
+extern SemaphoreHandle_t spiMutex;
 VitalsData getVitalsSnapshot();
 
 // Three displayed limb leads, stored as baseline-centered tenths of mV.

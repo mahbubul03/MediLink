@@ -35,9 +35,9 @@ Therefore the display shows three limb-lead traces, but only two independent ana
 Touch input is initialized but not used for controls in this firmware.
 
 ### MAX30105
-- SDA = GPIO5, SCL = GPIO6, address = 0x57.
-- Ensure the MAX30105 breakout is compatible with the same 3.3 V I2C bus.
-- The display touch controller and MAX30105 share I2C.
+- SDA = GPIO21, SCL = GPIO20, address = 0x57 (dedicated I2C controller 1).
+- Touch (GPIO5/6) is on a separate controller; they do not share a bus.
+- GPIO20 is also the ESP32-S3 native USB D+ pin. If you use the native USB port for Serial/flashing, move the MAX30105 to other pins in config.h.
 
 ### ADS1293 (from supplied medilink_ecg_v3.ino)
 | Signal | ESP32-S3 |
@@ -47,7 +47,7 @@ Touch input is initialized but not used for controls in this firmware.
 | DRDY | 9 |
 | ALARM | 8 |
 
-The TFT and ADS1293 share SCLK/MOSI/MISO but have separate chip-select pins. Verify that both devices tri-state MISO when CS is inactive.
+The TFT and ADS1293 share SCLK/MOSI/MISO but have separate chip-select pins. Verify that both devices tri-state MISO when CS is inactive. Access is serialized in firmware with `spiMutex`, and both CS lines are parked high at the start of setup().
 
 ### ADS1293 electrode inputs
 - RA -> IN1

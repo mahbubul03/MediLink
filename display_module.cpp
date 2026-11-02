@@ -48,6 +48,12 @@ static bool displayReady = false;
 static uint32_t lastVitalsRefresh = 0;
 static uint32_t lastStatusRefresh = 0;
 
+// RAII lock for the SPI bus shared with the ADS1293 (see ecg_module.cpp).
+struct SpiLock {
+    SpiLock()  { if (spiMutex != nullptr) xSemaphoreTake(spiMutex, portMAX_DELAY); }
+    ~SpiLock() { if (spiMutex != nullptr) xSemaphoreGive(spiMutex); }
+};
+
 #if ECG_DISPLAY_TEST_MODE
 static uint32_t testSample = 0;
 #endif
@@ -115,7 +121,7 @@ void displayModuleInit() {
     );
     gfx = new Arduino_ST7796(displayBus, TFT_RST, 0, true, 320, 480);
 
-    if (gfx == nullptr || !gfx->begin()) {
+    if (gfx == nullptr || !gfx->begin(40000000)) {
         Serial.println("[DISPLAY] ERROR: ST7796 initialization failed");
         displayReady = false;
         return;
@@ -142,7 +148,7 @@ void displayModuleInit() {
 // Keep the trace centered and clipped to its own lead box.
 static int16_t mapEcgToY(int16_t sample, int lead) {
     const int centerY = GRAPH_TOPS[lead] + GRAPH_CENTER_OFFSET;
-    const float pixelsPerTenthMillivolt = 0.9f;
+    const float pixelsPerTenthMillivolt = 2.0f;   // 20 px/mV
     const int y = centerY - (int)lroundf(sample * pixelsPerTenthMillivolt);
     const int minY = GRAPH_TOPS[lead] - 14;
     const int maxY = GRAPH_TOPS[lead] + 44;
@@ -152,31 +158,41 @@ static int16_t mapEcgToY(int16_t sample, int lead) {
 static void drawVitals() {
     const VitalsData v = getVitalsSnapshot();
 
-    gfx->fillRect(55, 282, 110, 37, COLOR_BLACK);
-    gfx->fillRect(220, 282, 110, 37, COLOR_BLACK);
-    gfx->setTextSize(3);
-
-    gfx->setTextColor(v.hrValid ? 0x07E0 : 0xFBE0);
-    gfx->setCursor(55, 282);
-    if (v.hrValid) gfx->printf("%d", v.heartRateBPM);
-    else gfx->print("--");
-
-    gfx->setTextColor(v.spo2Valid ? 0x07E0 : 0xFBE0);
-    gfx->setCursor(220, 282);
-    if (v.spo2Valid) gfx->printf("%d%%", v.spo2Percent);
-    else gfx->print("--");
-
-    gfx->setTextSize(1);
-    gfx->setTextColor(COLOR_WHITE);
-    gfx->fillRect(350, 282, 125, 36, COLOR_BLACK);
-    gfx->setCursor(350, 286);
-    gfx->printf("GPS %s", v.gpsFix ? "FIX" : "NO FIX");
-    gfx->setCursor(350, 301);
-    gfx->printf("Satellites: %d", v.gpsSatellites);
+    // Lock the SPI bus per field (not for the whole function) so the ECG
+    // task is never blocked long enough to drop conversions.
+    {
+        SpiLock lock;
+        gfx->fillRect(55, 282, 110, 37, COLOR_BLACK);
+        gfx->setTextSize(3);
+        gfx->setTextColor(v.hrValid ? 0x07E0 : 0xFBE0);
+        gfx->setCursor(55, 282);
+        if (v.hrValid) gfx->printf("%d", v.heartRateBPM);
+        else gfx->print("--");
+    }
+    {
+        SpiLock lock;
+        gfx->fillRect(220, 282, 110, 37, COLOR_BLACK);
+        gfx->setTextSize(3);
+        gfx->setTextColor(v.spo2Valid ? 0x07E0 : 0xFBE0);
+        gfx->setCursor(220, 282);
+        if (v.spo2Valid) gfx->printf("%d%%", v.spo2Percent);
+        else gfx->print("--");
+    }
+    {
+        SpiLock lock;
+        gfx->setTextSize(1);
+        gfx->setTextColor(COLOR_WHITE);
+        gfx->fillRect(350, 282, 125, 36, COLOR_BLACK);
+        gfx->setCursor(350, 286);
+        gfx->printf("GPS %s", v.gpsFix ? "FIX" : "NO FIX");
+        gfx->setCursor(350, 301);
+        gfx->printf("Satellites: %d", v.gpsSatellites);
+    }
 }
 
 static void drawStatusLine() {
     const VitalsData v = getVitalsSnapshot();
+    SpiLock lock;
     gfx->fillRect(8, 250, 465, 16, COLOR_BLACK);
     gfx->setTextSize(1);
     gfx->setTextColor(0x7BEF);
@@ -187,6 +203,7 @@ static void drawStatusLine() {
 
 static void drawOneEcgColumn(const int16_t samples[3]) {
     const int16_t x = GRAPH_X + xPosition;
+    SpiLock lock;
 
     // Erase only the current vertical column inside the three waveform boxes.
     // This avoids clearing the labels, status line, or vital-sign panel.
@@ -196,6 +213,8 @@ static void drawOneEcgColumn(const int16_t samples[3]) {
     }
 
     for (int lead = 0; lead < 3; ++lead) {
+        // Restore the baseline pixel the column erase removed.
+        gfx->drawPixel(x, GRAPH_TOPS[lead] + GRAPH_CENTER_OFFSET, COLOR_BASELINE);
         const int16_t y = mapEcgToY(samples[lead], lead);
         if (previousY[lead] >= 0) {
             gfx->drawLine(x - 1, previousY[lead], x, y, TRACE_COLORS[lead]);

@@ -2,6 +2,7 @@
 VitalsData vitals;
 SemaphoreHandle_t vitalsMutex=nullptr;
 SemaphoreHandle_t i2cMutex=nullptr;
+SemaphoreHandle_t spiMutex=nullptr;
 volatile int16_t ecgWaveI[ECG_WAVE_BUF_LEN]={0};
 volatile int16_t ecgWaveII[ECG_WAVE_BUF_LEN]={0};
 volatile int16_t ecgWaveIII[ECG_WAVE_BUF_LEN]={0};
